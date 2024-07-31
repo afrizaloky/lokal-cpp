@@ -71,16 +71,26 @@ void Tunnel::__showStartupBanner(void)
 LOKAL_CONST_DEF_CPP(Lokal::TunnelTypeHTTP);
 
 Lokal::Lokal(std::string base_url):
-	curl_(nullptr),
 	base_url_(base_url)
 {
+	this->curl_pImpl = std::make_unique<CurlImpl>();
 }
 
 Lokal::~Lokal(void)
 {
-	if (curl_)
-		curl_easy_cleanup(static_cast<CURL *>(curl_));
 }
+
+
+void curlDeleter(CURL* ptr) {
+	curl_easy_cleanup(ptr);
+}
+void curlListDeleter(curl_slist* ptr) {
+	curl_slist_free_all(ptr);
+}
+
+using CURL_ptr       = std::unique_ptr<CURL, decltype(&curlDeleter)>;
+using curl_slist_ptr = std::unique_ptr<curl_slist, decltype(&curlListDeleter)>;
+
 
 struct curl_data {
 	std::string res_body;
@@ -108,33 +118,22 @@ static size_t res_hdr_callback(void *contents, size_t size, size_t nmemb,
 	return full_size;
 }
 
-std::string Lokal::post(std::string path, std::string data)
-{
-	return __curl(path, "POST", data);
-}
+class Lokal::CurlImpl {
+private:
+	CURL_ptr curl_;
+public:
+	CurlImpl(): curl_(curl_easy_init(), curlDeleter) {}
+	
+	std::string __curl(std::string const& url, std::string const& method,
+					std::string const& req_body = "") {
 
-std::string Lokal::__curl(std::string path, std::string method,
-			  std::string req_body)
-{
-	struct curl_slist *headers = nullptr;
-	std::string url = base_url_ + path;
 	struct curl_data data;
 	long http_code = 0;
 	CURLcode res;
-	CURL *ch;
+	CURL *ch = curl_.get();
 
-	if (!curl_) {
-		ch = curl_easy_init();
-		if (!ch)
-			throw std::runtime_error("Failed to initialize curl");
-
-		curl_ = static_cast<void *>(ch);
-	} else {
-		ch = static_cast<CURL *>(curl_);
-	}
-
-	headers = curl_slist_append(headers, "Content-Type: application/json");
-
+	curl_slist_ptr headers {curl_slist_append(nullptr, "Content-Type: application/json"), curlListDeleter};
+	
 	curl_easy_setopt(ch, CURLOPT_URL, url.c_str());
 	curl_easy_setopt(ch, CURLOPT_CUSTOMREQUEST, method.c_str());
 	curl_easy_setopt(ch, CURLOPT_WRITEFUNCTION, &res_body_callback);
@@ -143,7 +142,7 @@ std::string Lokal::__curl(std::string path, std::string method,
 	curl_easy_setopt(ch, CURLOPT_HEADERDATA, &data);
 	curl_easy_setopt(ch, CURLOPT_USERAGENT, "Lokal Go - github.com/lokal-so/lokal-go");
 	curl_easy_setopt(ch, CURLOPT_VERBOSE, 0L);
-	curl_easy_setopt(ch, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(ch, CURLOPT_HTTPHEADER, headers.get());
 	if (req_body != "") {
 		curl_easy_setopt(ch, CURLOPT_POST, 1L);
 		curl_easy_setopt(ch, CURLOPT_POSTFIELDSIZE, req_body.size());
@@ -151,10 +150,7 @@ std::string Lokal::__curl(std::string path, std::string method,
 	}
 
 	res = curl_easy_perform(ch);
-	curl_slist_free_all(headers);
 	if (res != CURLE_OK) {
-		curl_ = nullptr;
-		curl_easy_cleanup(ch);
 		throw std::runtime_error(curl_easy_strerror(res));
 	}
 
@@ -173,6 +169,14 @@ std::string Lokal::__curl(std::string path, std::string method,
 	}
 
 	return data.res_body;
+	}
+};
+
+std::string Lokal::post(std::string path, std::string data)
+{
+	std::string url {this->base_url_ + path};
+	return this->curl_pImpl->__curl(url, "POST", data);
 }
+
 
 } /* namespace LokalSo */
