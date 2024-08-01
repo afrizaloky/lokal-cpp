@@ -25,4 +25,5 @@ target_link_libraries(lokal_shared PRIVATE curl)
 set_target_properties(lokal_static PROPERTIES OUTPUT_NAME lokal)
 set_target_properties(lokal_shared PROPERTIES OUTPUT_NAME lokal)
 
+enable_testing()
 add_subdirectory(test)
