@@ -6,7 +6,9 @@ FetchContent_Declare(
   OVERRIDE_FIND_PACKAGE)
 FetchContent_MakeAvailable(googletest)
 
-
+include(GoogleTest)
 
 add_executable(Tunnel-Test Tunnel.cpp)
 target_link_libraries(Tunnel-Test gtest_main lokal_static)
+
+gtest_discover_tests(Tunnel-Test)
